@@ -1,0 +1,649 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lecteur TNT France</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>
+        .channel-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        
+        .channel-button {
+            transition: all 0.3s ease;
+        }
+        
+        .channel-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+        
+        .video-container {
+            position: relative;
+            width: 100%;
+            height: 0;
+            padding-bottom: 56.25%; /* 16:9 aspect ratio */
+        }
+        
+        .video-container video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .loading-spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3b82f6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .fullscreen-controls {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 1000;
+    opacity: 1 !important; /* toujours visible */
+    pointer-events: auto !important; /* toujours cliquable */
+}
+        
+        .fullscreen-controls.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        
+        .fullscreen-channels-panel {
+            position: fixed;
+            top: 0;
+            right: -400px;
+            width: 400px;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.95);
+            backdrop-filter: blur(10px);
+            z-index: 1001;
+            transition: right 0.3s ease;
+            overflow-y: auto;
+        }
+        
+        .fullscreen-channels-panel.open {
+            right: 0;
+        }
+        
+        .fullscreen-channel-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        
+        .fullscreen-channel-item:hover {
+            background-color: rgba(59, 130, 246, 0.2);
+        }
+        
+        .fullscreen-channel-item.active {
+            background-color: rgba(59, 130, 246, 0.3);
+        }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 min-h-screen text-white">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="text-center mb-8">
+            <h1 class="text-4xl font-bold mb-2 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                📺 Lecteur TNT France
+            </h1>
+            <p class="text-gray-300">Regardez vos chaînes préférées en direct</p>
+        </div>
+
+        <!-- Video Player -->
+        <div class="bg-black rounded-xl shadow-2xl mb-8 overflow-hidden">
+            <div class="video-container">
+                <video id="videoPlayer" controls class="w-full h-full bg-black">
+                    <source src="" type="application/x-mpegURL">
+                    Votre navigateur ne supporte pas la lecture vidéo.
+                </video>
+                
+                <!-- Loading indicator -->
+                <div id="loadingIndicator" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-75 hidden">
+                    <div class="text-center">
+                        <div class="loading-spinner mx-auto mb-4"></div>
+                        <p class="text-white">Chargement de la chaîne...</p>
+                    </div>
+                </div>
+                
+                <!-- Welcome message -->
+                <div id="welcomeMessage" class="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-blue-600 to-purple-600">
+                    <div class="text-center p-8">
+                        <div class="text-6xl mb-4">📺</div>
+                        <h2 class="text-2xl font-bold mb-2">Bienvenue sur le lecteur TNT</h2>
+                        <p class="text-blue-100">Sélectionnez une chaîne pour commencer à regarder</p>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Current channel info -->
+            <div id="channelInfo" class="p-4 bg-gray-900 hidden">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 id="currentChannelName" class="text-lg font-semibold"></h3>
+                        <p class="text-gray-400 text-sm">En direct</p>
+                    </div>
+                    <div class="flex items-center space-x-4">
+                        <button id="customFullscreenBtn" class="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm font-medium transition-colors duration-200">
+                            🔍 Plein écran
+                        </button>
+                        <div class="flex items-center space-x-2">
+                            <div class="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                            <span class="text-red-400 text-sm font-medium">LIVE</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Channel Selection Button -->
+        <div class="text-center mb-6">
+            <button id="toggleChannels" class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 px-8 py-3 rounded-full font-semibold text-white shadow-lg transition-all duration-300 transform hover:scale-105">
+                📋 Afficher les chaînes
+            </button>
+        </div>
+
+        <!-- Channels Grid -->
+        <div id="channelsContainer" class="hidden">
+            <h2 class="text-2xl font-bold mb-6 text-center">Sélectionnez une chaîne</h2>
+            <div class="channel-grid" id="channelsGrid">
+                <!-- Channels will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Controls -->
+    <div id="fullscreenControls" class="fullscreen-controls">
+        <div class="flex items-center space-x-3">
+            <button id="prevChannelBtn" class="bg-black bg-opacity-70 hover:bg-opacity-90 text-white px-3 py-2 rounded-lg shadow-lg transition-all duration-300 flex items-center">
+                <span class="text-xl">←</span>
+            </button>
+            <button id="fullscreenChannelsBtn" class="bg-black bg-opacity-70 hover:bg-opacity-90 text-white px-4 py-2 rounded-lg shadow-lg transition-all duration-300 flex items-center space-x-2">
+                <span>📋</span>
+                <span>Chaînes</span>
+            </button>
+            <button id="nextChannelBtn" class="bg-black bg-opacity-70 hover:bg-opacity-90 text-white px-3 py-2 rounded-lg shadow-lg transition-all duration-300 flex items-center">
+                <span class="text-xl">→</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Fullscreen Channels Panel -->
+    <div id="fullscreenChannelsPanel" class="fullscreen-channels-panel">
+        <div class="p-4 border-b border-gray-700">
+            <div class="flex items-center justify-between">
+                <h3 class="text-lg font-semibold text-white">Chaînes TNT</h3>
+                <button id="closeFullscreenPanel" class="text-gray-400 hover:text-white text-xl">✕</button>
+            </div>
+        </div>
+        <div id="fullscreenChannelsList">
+            <!-- Channels will be populated here -->
+        </div>
+    </div>
+
+    <script>
+        // Channel data from M3U
+        const channels = [
+            { name: "TF1", url: "https://viamotionhsi.netplus.ch/live/eds/tf1hd/browser-HLS8/tf1hd.m3u8", logo: "🔴" },
+            { name: "France 2", url: "https://raw.githubusercontent.com/ipstreet312/freeiptv/master/ressources/ftv/py/fr2.m3u8", logo: "🇫🇷" },
+            { name: "France 3", url: "https://raw.githubusercontent.com/schumijo/iptv/refs/heads/main/playlists/francetv/france3.m3u8", logo: "🟦" },
+            { name: "France 4", url: "https://raw.githubusercontent.com/ipstreet312/freeiptv/master/ressources/ftv/py/fr4.m3u8", logo: "🟣" },
+            { name: "France 5", url: "https://raw.githubusercontent.com/schumijo/iptv/refs/heads/main/playlists/francetv/france5.m3u8", logo: "🟢" },
+            { name: "M6", url: "https://viamotionhsi.netplus.ch/live/eds/m6hd/browser-HLS8/m6hd.m3u8", logo: "🔶" },
+            { name: "Arte", url: "https://artesimulcast.akamaized.net/hls/live/2031003/artelive_fr/index.m3u8", logo: "🎨" },
+            { name: "Public Sénat", url: "https://tvradiozap.eu/tools/dm-m3u8.php/xkxbzc", logo: "🏛️" },
+            { name: "LCP", url: "https://tvradiozap.eu/tools/dm-m3u8.php/xgepjr", logo: "📺" },
+            { name: "W9", url: "https://viamotionhsi.netplus.ch/live/eds/w9/browser-HLS8/w9.m3u8", logo: "⚪" },
+            { name: "TMC", url: "https://viamotionhsi.netplus.ch/live/eds/tmc/browser-HLS8/tmc.m3u8", logo: "🔵" },
+            { name: "TFX", url: "https://viamotionhsi.netplus.ch/live/eds/nt1/browser-HLS8/nt1.m3u8", logo: "❌" },
+            { name: "Gulli", url: "https://tvradiozap.eu/tools/np-m3u8.php/gulli.m3u8", logo: "🎪" },
+            { name: "BFM TV", url: "https://live-cdn-stream-euw1.bfmtv.bct.nextradiotv.com/master.m3u8", logo: "📰" },
+            { name: "CNews", url: "https://hls-m015-live-aka-canalplus.akamaized.net/live/disk/cnews-clair-hd/hls-v3-hd-clair/cnews-clair-hd.m3u8", logo: "📢" },
+            { name: "LCI", url: "https://raw.githubusercontent.com/ipstreet312/freeiptv/master/ressources/btv/py/lci1.m3u8", logo: "ℹ️" },
+            { name: "France Info", url: "https://tvradiozap.eu/tools/dm-m3u8.php/x4rdeu6", logo: "📻" },
+            { name: "CStar", url: "https://tvradiozap.eu/tools/dm-m3u8.php/x5gv5v0", logo: "⭐" },
+            { name: "T18", url: "https://tvradiozap.eu/tools/np-m3u8.php/t18.m3u8", logo: "🔞" },
+            { name: "TF1 Séries Films", url: "https://viamotionhsi.netplus.ch/live/eds/hd1/browser-HLS8/hd1.m3u8", logo: "🎬" },
+            { name: "L'Équipe", url: "https://tvradiozap.eu/tools/dm-m3u8.php/x2lefik", logo: "⚽" },
+            { name: "6TER", url: "https://viamotionhsi.netplus.ch/live/eds/6ter/browser-HLS8/6ter.m3u8", logo: "6️⃣" },
+            { name: "RMC Story", url: "https://d15aro46bnpfm8.cloudfront.net/v1/master/3722c60a815c199d9c0ef36c5b73da68a62b09d1/cc-fqkqiax1078up/RMC_Story_FR.m3u8", logo: "📖" },
+            { name: "RMC Découverte", url: "https://d16zzycxcd0m0r.cloudfront.net/v1/master/3722c60a815c199d9c0ef36c5b73da68a62b09d1/cc-hixvx5kymecr9/RMC_Decouverte_FR.m3u8", logo: "🔍" },
+            { name: "Chérie 25", url: "https://tvradiozap.eu/tools/np-m3u8.php/cherie25.m3u8", logo: "💖" }
+        ];
+
+        let hls = null;
+        let currentChannel = null;
+        let isFullscreen = false;
+        let fullscreenTimeout = null;
+        
+        const video = document.getElementById('videoPlayer');
+        const toggleButton = document.getElementById('toggleChannels');
+        const channelsContainer = document.getElementById('channelsContainer');
+        const channelsGrid = document.getElementById('channelsGrid');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+        const welcomeMessage = document.getElementById('welcomeMessage');
+        const channelInfo = document.getElementById('channelInfo');
+        const currentChannelName = document.getElementById('currentChannelName');
+        const fullscreenControls = document.getElementById('fullscreenControls');
+        const fullscreenChannelsBtn = document.getElementById('fullscreenChannelsBtn');
+        const fullscreenChannelsPanel = document.getElementById('fullscreenChannelsPanel');
+        const closeFullscreenPanel = document.getElementById('closeFullscreenPanel');
+        const fullscreenChannelsList = document.getElementById('fullscreenChannelsList');
+        const customFullscreenBtn = document.getElementById('customFullscreenBtn');
+        const prevChannelBtn = document.getElementById('prevChannelBtn');
+        const nextChannelBtn = document.getElementById('nextChannelBtn');
+
+        // Toggle channels visibility
+        toggleButton.addEventListener('click', () => {
+            const isHidden = channelsContainer.classList.contains('hidden');
+            if (isHidden) {
+                channelsContainer.classList.remove('hidden');
+                toggleButton.textContent = '🔼 Masquer les chaînes';
+                channelsContainer.scrollIntoView({ behavior: 'smooth' });
+            } else {
+                channelsContainer.classList.add('hidden');
+                toggleButton.textContent = '📋 Afficher les chaînes';
+            }
+        });
+
+        // Create channel buttons
+        function createChannelButtons() {
+            channelsGrid.innerHTML = '';
+            channels.forEach(channel => {
+                const button = document.createElement('button');
+                button.className = 'channel-button bg-gradient-to-br from-gray-800 to-gray-900 hover:from-blue-600 hover:to-purple-600 p-4 rounded-xl text-left shadow-lg border border-gray-700 hover:border-blue-500';
+                button.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <div class="text-2xl">${channel.logo}</div>
+                        <div>
+                            <div class="font-semibold text-white">${channel.name}</div>
+                            <div class="text-xs text-gray-400">Cliquez pour regarder</div>
+                        </div>
+                    </div>
+                `;
+                button.addEventListener('click', () => playChannel(channel));
+                channelsGrid.appendChild(button);
+            });
+        }
+
+        // Play selected channel
+        function playChannel(channel) {
+            showLoading();
+            currentChannel = channel;
+            
+            // Hide welcome message
+            welcomeMessage.classList.add('hidden');
+            
+            // Update channel info
+            currentChannelName.textContent = channel.name;
+            channelInfo.classList.remove('hidden');
+            
+            // Clean up previous HLS instance
+            if (hls) {
+                hls.destroy();
+            }
+            
+            // Check if HLS is supported
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    enableWorker: false,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+                
+                hls.loadSource(channel.url);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    hideLoading();
+                    // Enable fullscreen button
+                    video.setAttribute('controlsList', '');
+                    video.play().then(() => {
+                        // Enter fullscreen after video starts playing
+                        setTimeout(() => {
+                            enterFullscreen();
+                        }, 500);
+                    }).catch(e => {
+                        console.log('Autoplay prevented:', e);
+                        hideLoading();
+                        // Still enter fullscreen even if autoplay fails
+                        setTimeout(() => {
+                            enterFullscreen();
+                        }, 500);
+                    });
+                });
+                
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    console.error('HLS Error:', data);
+                    hideLoading();
+                    showError(`Erreur de lecture pour ${channel.name}`);
+                });
+                
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = channel.url;
+                video.addEventListener('loadedmetadata', () => {
+                    hideLoading();
+                    // Enable fullscreen button
+                    video.setAttribute('controlsList', '');
+                    video.play().then(() => {
+                        setTimeout(() => {
+                            enterFullscreen();
+                        }, 500);
+                    }).catch(e => {
+                        console.log('Autoplay prevented:', e);
+                        hideLoading();
+                        setTimeout(() => {
+                            enterFullscreen();
+                        }, 500);
+                    });
+                });
+                
+                video.addEventListener('error', () => {
+                    hideLoading();
+                    showError(`Erreur de lecture pour ${channel.name}`);
+                });
+            } else {
+                hideLoading();
+                showError('Votre navigateur ne supporte pas la lecture HLS');
+            }
+            
+            // Hide channels after selection
+            channelsContainer.classList.add('hidden');
+            toggleButton.textContent = '📋 Afficher les chaînes';
+            
+            // Update fullscreen channels list
+            updateFullscreenChannelsList();
+        }
+
+        // Enter fullscreen mode
+        function enterFullscreen() {
+            const videoContainer = video.closest('.bg-black');
+            if (videoContainer.requestFullscreen) {
+                videoContainer.requestFullscreen();
+            } else if (videoContainer.webkitRequestFullscreen) {
+                videoContainer.webkitRequestFullscreen();
+            } else if (videoContainer.msRequestFullscreen) {
+                videoContainer.msRequestFullscreen();
+            }
+        }
+
+        // Handle fullscreen change events
+        function handleFullscreenChange() {
+    isFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement || document.msFullscreenElement);
+    if (isFullscreen) {
+        console.log('Entering fullscreen mode');
+        fullscreenControls.classList.add('visible'); // toujours visible
+        // Ne pas appeler setupMouseMovement() ni resetFullscreenTimeout()
+    } else {
+        console.log('Exiting fullscreen mode');
+        fullscreenControls.classList.remove('visible');
+        fullscreenChannelsPanel.classList.remove('open');
+    }
+}
+
+
+        // Show fullscreen controls
+        function showFullscreenControls() {
+            if (isFullscreen) {
+                fullscreenControls.classList.add('visible');
+                resetFullscreenTimeout();
+            }
+        }
+
+        // Hide fullscreen controls
+        function hideFullscreenControls() {
+            if (isFullscreen && !fullscreenChannelsPanel.classList.contains('open')) {
+                fullscreenControls.classList.remove('visible');
+            }
+        }
+
+        // Setup mouse movement detection in fullscreen
+        function setupMouseMovement() {
+            document.addEventListener('mousemove', handleMouseMove);
+            document.addEventListener('contextmenu', handleRightClick);
+            document.addEventListener('click', handleClick);
+        }
+
+        // Handle mouse movement in fullscreen
+        function handleMouseMove() {
+            if (isFullscreen) {
+                showFullscreenControls();
+                resetFullscreenTimeout();
+            }
+        }
+
+        // Handle right click in fullscreen
+        function handleRightClick(e) {
+            if (isFullscreen) {
+                e.preventDefault(); // Prevent default context menu
+                console.log('Right click detected in fullscreen');
+                fullscreenControls.classList.add('visible');
+                fullscreenControls.style.opacity = '1';
+                fullscreenControls.style.pointerEvents = 'auto';
+                resetFullscreenTimeout();
+                return false;
+            }
+        }
+
+        // Handle click in fullscreen
+        function handleClick(e) {
+            if (isFullscreen) {
+                console.log('Click detected in fullscreen');
+                fullscreenControls.classList.add('visible');
+                fullscreenControls.style.opacity = '1';
+                fullscreenControls.style.pointerEvents = 'auto';
+                resetFullscreenTimeout();
+            }
+        }
+
+        // Reset fullscreen timeout
+        function resetFullscreenTimeout() {
+            if (fullscreenTimeout) {
+                clearTimeout(fullscreenTimeout);
+            }
+            fullscreenTimeout = setTimeout(() => {
+                if (isFullscreen && !fullscreenChannelsPanel.classList.contains('open')) {
+                    hideFullscreenControls();
+                }
+            }, 3000);
+        }
+
+        // Get current channel index
+        function getCurrentChannelIndex() {
+            if (!currentChannel) return -1;
+            return channels.findIndex(channel => channel.name === currentChannel.name);
+        }
+
+        // Go to previous channel
+        function goToPreviousChannel() {
+            const currentIndex = getCurrentChannelIndex();
+            if (currentIndex === -1) return;
+            
+            const prevIndex = currentIndex === 0 ? channels.length - 1 : currentIndex - 1;
+            const prevChannel = channels[prevIndex];
+            playChannelInFullscreen(prevChannel);
+        }
+
+        // Go to next channel
+        function goToNextChannel() {
+            const currentIndex = getCurrentChannelIndex();
+            if (currentIndex === -1) return;
+            
+            const nextIndex = currentIndex === channels.length - 1 ? 0 : currentIndex + 1;
+            const nextChannel = channels[nextIndex];
+            playChannelInFullscreen(nextChannel);
+        }
+
+        // Play channel and maintain fullscreen
+        function playChannelInFullscreen(channel) {
+            showLoading();
+            currentChannel = channel;
+            
+            // Update channel info
+            currentChannelName.textContent = channel.name;
+            
+            // Clean up previous HLS instance
+            if (hls) {
+                hls.destroy();
+            }
+            
+            // Check if HLS is supported
+            if (Hls.isSupported()) {
+                hls = new Hls({
+                    enableWorker: false,
+                    lowLatencyMode: true,
+                    backBufferLength: 90
+                });
+                
+                hls.loadSource(channel.url);
+                hls.attachMedia(video);
+                
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    hideLoading();
+                    video.play().catch(e => {
+                        console.log('Autoplay prevented:', e);
+                    });
+                });
+                
+                hls.on(Hls.Events.ERROR, (event, data) => {
+                    console.error('HLS Error:', data);
+                    hideLoading();
+                    showError(`Erreur de lecture pour ${channel.name}`);
+                });
+                
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                // Native HLS support (Safari)
+                video.src = channel.url;
+                video.addEventListener('loadedmetadata', () => {
+                    hideLoading();
+                    video.play().catch(e => {
+                        console.log('Autoplay prevented:', e);
+                    });
+                });
+                
+                video.addEventListener('error', () => {
+                    hideLoading();
+                    showError(`Erreur de lecture pour ${channel.name}`);
+                });
+            } else {
+                hideLoading();
+                showError('Votre navigateur ne supporte pas la lecture HLS');
+            }
+            
+            // Update fullscreen channels list
+            updateFullscreenChannelsList();
+        }
+
+        // Update fullscreen channels list
+        function updateFullscreenChannelsList() {
+            fullscreenChannelsList.innerHTML = '';
+            channels.forEach(channel => {
+                const item = document.createElement('div');
+                item.className = `fullscreen-channel-item ${currentChannel && currentChannel.name === channel.name ? 'active' : ''}`;
+                item.innerHTML = `
+                    <div class="text-xl mr-3">${channel.logo}</div>
+                    <div class="text-white font-medium">${channel.name}</div>
+                `;
+                item.addEventListener('click', () => {
+                    if (isFullscreen) {
+                        playChannelInFullscreen(channel);
+                    } else {
+                        playChannel(channel);
+                    }
+                    fullscreenChannelsPanel.classList.remove('open');
+                });
+                fullscreenChannelsList.appendChild(item);
+            });
+        }
+
+        function showLoading() {
+            loadingIndicator.classList.remove('hidden');
+        }
+
+        function hideLoading() {
+            loadingIndicator.classList.add('hidden');
+        }
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'fixed top-4 right-4 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg z-50';
+            errorDiv.textContent = message;
+            document.body.appendChild(errorDiv);
+            
+            setTimeout(() => {
+                errorDiv.remove();
+            }, 5000);
+        }
+
+        // Event listeners for fullscreen controls
+        fullscreenChannelsBtn.addEventListener('click', () => {
+            fullscreenChannelsPanel.classList.add('open');
+            showFullscreenControls(); // Keep controls visible when panel is open
+        });
+
+        closeFullscreenPanel.addEventListener('click', () => {
+            fullscreenChannelsPanel.classList.remove('open');
+        });
+
+        // Custom fullscreen button
+        customFullscreenBtn.addEventListener('click', () => {
+            enterFullscreen();
+        });
+
+        // Navigation buttons
+        prevChannelBtn.addEventListener('click', () => {
+            goToPreviousChannel();
+            showFullscreenControls(); // Keep controls visible after channel change
+        });
+
+        nextChannelBtn.addEventListener('click', () => {
+            goToNextChannel();
+            showFullscreenControls(); // Keep controls visible after channel change
+        });
+
+        // Fullscreen change event listeners
+        document.addEventListener('fullscreenchange', handleFullscreenChange);
+        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        document.addEventListener('msfullscreenchange', handleFullscreenChange);
+
+        // Close panel when clicking outside
+        fullscreenChannelsPanel.addEventListener('click', (e) => {
+            if (e.target === fullscreenChannelsPanel) {
+                fullscreenChannelsPanel.classList.remove('open');
+            }
+        });
+
+        // Initialize the app
+        createChannelButtons();
+        
+        // Handle video events
+        video.addEventListener('waiting', showLoading);
+        video.addEventListener('playing', hideLoading);
+        video.addEventListener('canplay', hideLoading);
+    </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'97c7bc42f01f41aa',t:'MTc1NzQzMTkxNi4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
+f
